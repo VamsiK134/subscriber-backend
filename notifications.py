@@ -6,10 +6,13 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import messaging
 
+
 cred = credentials.Certificate("subscriberapp-1b005-firebase-adminsdk-ytjt8-82d190ad40.json")
 firebase_admin.initialize_app(cred)
 
 notification_bp = Blueprint('notification_bp', __name__)
+
+
 
 
 @notification_bp.route('/send/notification/payment/<user_id>', methods=['POST', 'GET'])
@@ -88,6 +91,23 @@ def send_invoice_notification():
     response = messaging.send(message)
 
     print('Successfully sent message:', response)
+
+def send_reminder_notification():
+    message = messaging.Message(
+        data={
+            'header': "Payment Reminder",
+            'title': "Your payment is pending. Please pay through our in app payment."
+        },
+        topic='global')
+    from main import db
+
+   # notification = db.notification.insert_one(request.json)
+    # return jsonify(json.loads(json.dumps(notification)))
+
+    response = messaging.send(message)
+
+    print('Successfully sent message:', response)
+
 
 
 @notification_bp.route('/get/notification/delivery/<user_id>', methods=["GET"])

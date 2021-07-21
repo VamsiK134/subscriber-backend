@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, json, request, url_for, redirect, flash
+from flask_crontab import Crontab
 from flask_pymongo import PyMongo
 from bson import json_util, ObjectId
 from werkzeug.utils import secure_filename
@@ -9,6 +10,14 @@ app = Flask(__name__, static_folder='uploads')
 app.config["MONGO_URI"] = "mongodb://localhost:27017/subscriber_db"
 mongodb_client = PyMongo(app)
 db = mongodb_client.db
+
+crontab = Crontab(app)
+
+
+@crontab.job(minute='0', hour='0', day='5')
+def schedule_job():
+    from notifications import send_reminder_notification
+    send_reminder_notification()
 
 
 @app.route('/user', methods=["POST"])
@@ -44,8 +53,10 @@ def signup():
 def update_user():
     uid = request.json['uid']
     user_id = request.json['user_id']
+    status = request.json['status']
     user = {'_id': ObjectId(user_id)}
-    token = {'$set': {'uid': uid}}
+    token = {'$set': {'uid': uid, 'status': status}}
+    # update_user_status = {'$set': {'status': status}}
     db.subscriber.update_one(user, token, upsert=True)
     return '', 200
 
@@ -85,10 +96,14 @@ def pause_subscription():
 def cancel_subscription():
     user_id = request.json['user_id']
     status = request.json['status']
-    user = {'_id': ObjectId(user_id)}
-    update_cancel_user = db.subscription.update_one(user, status, upsert=True)
+    reason = request.json['reason']
+    user = {'userId': user_id}
+    token = {'$set': {'status': status, 'reason': reason}}
+    user_status = {'$set': {'status': status}}
+    update_cancel_user = db.subscription.update_one(user, token, upsert=True)
+    update_user = db.subscriber.update_one({'_id': ObjectId(user_id)}, user_status, upsert=True)
     cancel_result = db.cancelSubscription.insert_one(request.json)
-    return jsonify(json.loads(json_util.dumps(cancel_result.inserted_id)))
+    return jsonify(status=True, msg="Cancelled Subscription")
 
 
 @app.route('/animalExpert', methods=["POST"])
@@ -105,13 +120,13 @@ def payment():
 
 @app.route('/update/payment', methods=["PUT"])
 def update_payment():
+    print(request.json)
     _id = ObjectId(request.json['_id'])
     update_dict = request.json
     del update_dict['_id']
     # payment_result = db.mongo.payment.insert_one(request.json)
     # notification = db.payment.insert_one(update_dict)
     filter = {'_id': _id}
-
     payment = {'$set': update_dict}
     db.mongo.payment.update_one(filter, payment, upsert=True)
     return '', 200
@@ -141,12 +156,19 @@ def address(user_id):
     return jsonify(json.loads(json_util.dumps(address_result.inserted_id)))
 
 
-@app.route('/user/<mobile_number>')
+@app.route('/user/<mobile_number>', methods=["GET"])
 def get_user(mobile_number):
     result = db.subscriber.find_one({'mobile_number': mobile_number})
-    # return jsonify(json.loads(json_util.dumps(result)))
+    user_id = str(result["_id"])
+    print(user_id)
+    address = db.address.find({'user_id': user_id})
+    user_events = db.calendar.find({'user_id': user_id})
+    sub = db.subscription.find({'user_id': user_id})
     result['_id'] = str(result['_id'])
-    return jsonify(result)
+    result['addresses'] = address
+    result['events'] = user_events
+    result['subscriptions'] = sub
+    return jsonify(json.loads(json_util.dumps(result)))
 
 
 @app.route('/get/calendar', methods=["GET"])
@@ -158,7 +180,7 @@ def get_calendar():
 
 @app.route('/user/paused/subscriptions/<user_id>', methods=["GET"])
 def get_pausedSubscriptions(user_id):
-    pausedSub = db.mongo.subscription.find({'$and': [{'user_id': user_id}, {"status": 2}]})
+    pausedSub = db.subscription.find({'$and': [{'user_id': user_id}, {"status": 2}]})
     # pausedSub['user_id'] = str(pausedSub['user_id'])
     return jsonify(json.loads(json_util.dumps(pausedSub)))
 
@@ -181,9 +203,9 @@ def get_montly_events(user_id):
     return jsonify({'result': len(month_event) - 1})
 
 
-@app.route('/user/<id>/subscriptions', methods=["GET"])
-def get_subscription(id):
-    sub = db.subscription.find({'user_id': id})
+@app.route('/user/<user_id>/subscriptions', methods=["GET"])
+def get_subscription(user_id):
+    sub = db.subscription.find({'user_id': user_id})
     if sub is None:
         return jsonify(''), 404
     return jsonify(json.loads(json_util.dumps(sub)))
