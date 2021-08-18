@@ -267,6 +267,27 @@ def get_delivery_agent(mobile):
     delivery_agent = db.delivery_agents.find_one_or_404({'mobile': mobile})
     return jsonify(json.loads(json_util.dumps(delivery_agent))) 
 
+
+@app.post('/delivery/update')
+def update_delivery_status():
+    payload = request.form.to_dict()
+
+    subscriptions = json.loads(payload['subscriptions'])
+
+    import utils
+    upload_path = utils.upload_file(
+        path='uploads/events/',
+        file=request.files['image'])
+
+    for subscription in subscriptions:
+        subscription.update({'image': upload_path})
+    
+    db.calendar.insert_many(subscriptions)
+    import notifications
+    notifications.send_delivery_notifications(subscriptions=subscriptions)
+    return jsonify(status=True, msg='Packages delivered successfully')
+
+
 def register_blueprints():
     from notifications import notification_bp
     app.register_blueprint(notification_bp)    
